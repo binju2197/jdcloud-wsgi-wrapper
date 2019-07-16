@@ -1,6 +1,10 @@
 import os
 import sys
-import StringIO
+import six
+if six.PY2:
+    import StringIO
+if six.PY3:
+    import io
 from headers import Headers
 from constants import StringType
 from file_wrapper import FileWrapper
@@ -26,7 +30,10 @@ class WsgiWrapper:
         self.headers = None
         self.content_length_flag = True
         self.result = None
-        self.body = StringIO.StringIO()
+        if six.PY2:
+            self.body = StringIO.StringIO()
+        if six.PY3:
+            self.body = io.StringIO()
         self.bytes_sent = 0
         self.headers_sent = False
         self.ret_content = {
@@ -49,27 +56,48 @@ class WsgiWrapper:
         env['PATH_INFO'] = request.get('path', '/')
 
         path_params = request.get('pathParameters')
-        if path_params is None:
-            for k, v in path_params.items():
-                k = k.replace('-', '_').upper()
-                v = v.strip()
-                if k in env:
-                    continue  # skip content length, type,etc.
-                if 'HTTP_' + k in env:
-                    env['HTTP_' + k] += ',' + v  # comma-separate multiple headers
-                else:
-                    env['HTTP_' + k] = v
+        if six.PY2:
+            if path_params is None:
+                for k, v in path_params.items():
+                    k = k.replace('-', '_').upper()
+                    v = v.strip()
+                    if k in env:
+                        continue  # skip content length, type,etc.
+                    if 'HTTP_' + k in env:
+                        env['HTTP_' + k] += ',' + v  # comma-separate multiple headers
+                    else:
+                        env['HTTP_' + k] = v
+        if six.PY3:
+            if path_params != None:
+                for k, v in path_params.items():
+                    k = k.replace('-', '_').upper()
+                    v = v.strip()
+                    if k in env:
+                        continue  # skip content length, type,etc.
+                    if 'HTTP_' + k in env:
+                        env['HTTP_' + k] += ',' + v  # comma-separate multiple headers
+                    else:
+                        env['HTTP_' + k] = v
 
         query_string = request.get('queryString', '')
         if query_string == '':
             query_params = request.get('queryParameters')
-            if query_params is None:
-                for k, v in query_params.items():
-                    k = k.strip()
-                    v = v.strip()
-                    if query_string != '':
-                        query_string = query_string + '&'
-                    query_string = query_string + k + '=' + v
+            if six.PY2:
+                if query_params is None:
+                    for k, v in query_params.items():
+                        k = k.strip()
+                        v = v.strip()
+                        if query_string != '':
+                            query_string = query_string + '&'
+                        query_string = query_string + k + '=' + v
+            if six.PY3:
+                if query_params != None:
+                    for k, v in query_params.items():
+                        k = k.strip()
+                        v = v.strip()
+                        if query_string != '':
+                            query_string = query_string + '&'
+                        query_string = query_string + k + '=' + v
         env['QUERY_STRING'] = query_string
 
         headers = request.get('headers')
@@ -82,15 +110,26 @@ class WsgiWrapper:
             content_type = 'Content-type: text/plain'
         env['CONTENT_TYPE'] = content_type
 
-        length = headers.get('content-length', '')
-        if length == '':
-            length = headers.get('Content-length', '')
-        if length == '':
-            length = headers.get('Content-Length', '')
-        if length != '':
-            env['CONTENT_LENGTH'] = length
-        else:
-            env['CONTENT_LENGTH'] = '0'
+        if six.PY2:
+            length = headers.get('content-length', '')
+            if length == '':
+                length = headers.get('Content-length', '')
+            if length == '':
+                length = headers.get('Content-Length', '')
+            if length != '':
+                env['CONTENT_LENGTH'] = length
+            else:
+                env['CONTENT_LENGTH'] = '0'
+        if six.PY3:
+            length = headers.get('content-length', None)
+            if length == None:
+                length = headers.get('Content-length', None)
+            if length == None:
+                length = headers.get('Content-Length', None)
+            if length:
+                env['CONTENT_LENGTH'] = length
+            else:
+                env['CONTENT_LENGTH'] = '0'
 
         for k, v in headers.items():
             k = k.replace('-', '_').upper()
@@ -103,7 +142,10 @@ class WsgiWrapper:
                 env['HTTP_' + k] = v
 
         input_body = request.get('body')
-        buf = StringIO.StringIO(input_body)
+        if six.PY2:
+            buf = StringIO.StringIO(input_body)
+        if six.PY3:
+            buf = io.StringIO(input_body)
         env['wsgi.input'] = buf
         env['wsgi.version'] = (1, 0)
         env['wsgi.url_scheme'] = self.get_scheme()
@@ -128,7 +170,7 @@ class WsgiWrapper:
             try:
                 if self.headers_sent:
                     # Re-raise original exception if headers sent
-                    raise exc_info[0], exc_info[1], exc_info[2]
+                    raise exc_info[0](exc_info[1]).with_traceback(exc_info[2])
             finally:
                 exc_info = None        # avoid dangling circular ref
         elif self.headers is not None:
@@ -180,8 +222,17 @@ class WsgiWrapper:
 
     def finish_response(self):
         for data in self.result:
-            str_data = str(data)
-            self.write(str_data)
+            if six.PY2:
+                str_data = str(data)
+                self.write(str_data)
+            if six.PY3:
+                if isinstance(data, str):
+                    str_data = data
+                elif isinstance(data, bytes):
+                    str_data = data.decode()
+                else:
+                    str_data = str(data)
+                self.write(str_data)
         self.finish_content()
 
     def finish_content(self):
@@ -215,4 +266,3 @@ class WsgiWrapper:
 
         self.ret_content['body'] = self.body.getvalue()
         return self.ret_content
-
